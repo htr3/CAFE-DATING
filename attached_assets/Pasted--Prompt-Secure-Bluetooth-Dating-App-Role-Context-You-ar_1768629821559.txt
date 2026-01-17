@@ -1,0 +1,419 @@
+# Prompt: Secure Bluetooth Dating App
+
+## 📋 Role & Context
+You are a senior Android engineer with 10+ years of experience in Bluetooth Classic, Kotlin, Jetpack Compose, and Android security. You specialize in building production-ready, Play Store-compliant apps.
+
+## 🎯 Goal
+Build a complete, working Android application for a Bluetooth-based dating/chat app that allows users to discover and chat with nearby people **without internet**, using **only Bluetooth**.
+
+---
+
+## 📱 Core Requirements
+
+### 1. Auto-Discovery (No Manual Buttons)
+- App automatically starts Bluetooth discovery when opened
+- App automatically starts Bluetooth server to accept connections
+- Users see a live list of nearby app users
+- No "Start Server" or "Scan" buttons - everything is automatic
+- Continuous scanning with auto-refresh every few seconds
+
+### 2. User Experience Flow
+```
+User opens app
+    ↓
+Auto-discovery starts (both server + scanning)
+    ↓
+Shows list of nearby users
+    ↓
+User taps a nearby person
+    ↓
+Connection request dialog on other person's phone
+    ↓
+Other person accepts/rejects
+    ↓
+If accepted: Both enter encrypted chat
+    ↓
+Real-time bidirectional messaging
+```
+
+### 3. Security (Play Store Compliant)
+**MANDATORY - These are non-negotiable:**
+
+- ✅ **User Consent**: Show "Accept/Reject" dialog for every connection attempt
+- ✅ **Device Identity**: Generate unique UUID on first install (stored in EncryptedSharedPreferences)
+- ✅ **Secure Handshake**: 
+  ```
+  Client → Server: HELLO|clientUUID|clientName
+  Server → Client: ACCEPT|sessionKey OR REJECT|reason
+  ```
+- ✅ **End-to-End Encryption**: AES-256-CBC with random IV per message
+- ✅ **Session Keys**: New session key per connection
+- ✅ **Rate Limiting**: Max 5 messages per second per connection
+- ✅ **Block Functionality**: Users can block devices permanently
+- ✅ **No Message Storage**: All messages in-memory only (never saved to disk)
+- ✅ **Background Safety**: Stop discovery when app goes to background
+
+### 4. Technical Stack
+- **Language**: Kotlin
+- **UI**: Jetpack Compose with Material 3
+- **Architecture**: MVVM (ViewModel, Repository, UseCase)
+- **Bluetooth**: Bluetooth Classic (RFCOMM) - NOT BLE
+- **Encryption**: AES-256 from javax.crypto
+- **Storage**: EncryptedSharedPreferences for device UUID only
+- **Async**: Kotlin Coroutines + Flow
+- **Min SDK**: 26 (Android 8.0)
+- **Target SDK**: 34 (Android 14)
+
+### 5. File Structure
+```
+app/src/main/java/com/cafe/dating/app/
+├── data/
+│   ├── local/
+│   │   ├── SecurePreferences.kt (EncryptedSharedPreferences for UUID)
+│   │   └── BlockedDevicesRepository.kt (Store blocked device UUIDs)
+│   ├── models/
+│   │   ├── BluetoothDeviceModel.kt
+│   │   ├── ChatMessage.kt
+│   │   └── ConnectionRequest.kt
+│   └── encryption/
+│       └── EncryptionUtils.kt (AES-256 encrypt/decrypt)
+├── domain/
+│   ├── bluetooth/
+│   │   ├── BluetoothServer.kt (RFCOMM server socket)
+│   │   ├── BluetoothClient.kt (RFCOMM client socket)
+│   │   ├── DiscoveryManager.kt (Auto-discovery with BroadcastReceiver)
+│   │   ├── SecureSocketManager.kt (Handles encrypted send/receive)
+│   │   └── HandshakeManager.kt (Connection handshake protocol)
+│   └── usecases/
+│       ├── ConnectToDeviceUseCase.kt
+│       └── SendMessageUseCase.kt
+├── presentation/
+│   ├── viewmodels/
+│   │   ├── BluetoothViewModel.kt (Discovery, connections, server/client)
+│   │   └── ChatViewModel.kt (Message handling, chat state)
+│   └── ui/
+│       ├── screens/
+│       │   ├── NearbyUsersScreen.kt (List of discovered users)
+│       │   └── ChatScreen.kt (Chat interface with messages)
+│       └── dialogs/
+│           └── ConnectionRequestDialog.kt (Accept/Reject dialog)
+├── utils/
+│   ├── PermissionManager.kt (Permission checking helpers)
+│   └── RateLimiter.kt (5 messages/sec limit)
+└── MainActivity.kt (Lifecycle, permissions, navigation)
+```
+
+---
+
+## 🔧 Detailed Component Specifications
+
+### EncryptionUtils.kt
+```kotlin
+- generateSessionKey(): SecretKey (AES-256)
+- keyToString(key): String (for transmission)
+- stringToKey(keyString): SecretKey
+- encrypt(message: String, key: SecretKey): String
+  → Generate random 16-byte IV
+  → Encrypt with AES/CBC/PKCS5Padding
+  → Return Base64(IV + encryptedData)
+- decrypt(encryptedMessage: String, key: SecretKey): String
+  → Decode Base64
+  → Extract IV (first 16 bytes)
+  → Decrypt remaining bytes
+  → Return plaintext
+```
+
+### HandshakeManager.kt
+```kotlin
+- performClientHandshake(): SecretKey?
+  → Send "HELLO|uuid|name\n"
+  → Wait for "ACCEPT|sessionKey\n" or "REJECT|reason\n"
+  → Return session key or null
+  
+- performServerHandshake(): Pair<String, SecretKey>?
+  → Read "HELLO|uuid|name\n"
+  → Call onConnectionRequest(uuid, name) → Boolean
+  → If accepted: Generate session key, send "ACCEPT|key\n"
+  → If rejected: Send "REJECT|reason\n"
+  → Return (clientUUID, sessionKey) or null
+```
+
+### SecureSocketManager.kt
+```kotlin
+- Constructor(socket, sessionKey, remoteDeviceUUID)
+- startListening(): Start thread to read messages
+  → Read until '\n'
+  → Decrypt with session key
+  → Emit to messageFlow: SharedFlow<ChatMessage>
+- sendMessage(message: String): Boolean
+  → Check rate limit (5/sec)
+  → Encrypt with session key
+  → Write with '\n' delimiter
+  → Return success/failure
+- connectionState: SharedFlow<ConnectionState>
+```
+
+### BluetoothServer.kt
+```kotlin
+- start(context): Boolean
+  → listenUsingRfcommWithServiceRecord(name, UUID)
+  → Loop: accept() connections
+  → For each connection: perform handshake
+  → If accepted: emit ConnectionEstablished(SecureSocketManager)
+- connectionFlow: SharedFlow<ServerEvent>
+  → Started, Stopped, ConnectionRequested, ConnectionEstablished, Error
+```
+
+### DiscoveryManager.kt
+```kotlin
+- startDiscovery()
+  → Register BroadcastReceiver for ACTION_FOUND
+  → startDiscovery()
+  → On ACTION_DISCOVERY_FINISHED: wait 3s, restart
+- discoveredDevices: StateFlow<List<BluetoothDeviceModel>>
+- Filter out blocked devices
+- Auto-rescan continuously
+```
+
+### BluetoothViewModel.kt
+```kotlin
+- startAutoMode()
+  → Start BluetoothServer
+  → Start DiscoveryManager
+- connectToDevice(device)
+  → Use BluetoothClient to connect
+  → Perform handshake
+  → Create SecureSocketManager
+  → Navigate to chat
+- acceptConnection() / rejectConnection()
+  → For incoming connection requests
+- discoveredDevices: StateFlow
+- connectionState: StateFlow
+- connectionRequest: StateFlow (for dialog)
+```
+
+### ChatViewModel.kt
+```kotlin
+- initializeChat(socket, deviceName)
+  → socket.startListening()
+  → Collect socket.messageFlow → add to messages list
+  → Collect socket.connectionState
+- sendMessage(content)
+  → Use SendMessageUseCase
+  → Add sent message to list
+- messages: StateFlow<List<ChatMessage>>
+- connectionState: StateFlow
+```
+
+### MainActivity.kt
+```kotlin
+- onCreate()
+  → Check Bluetooth support
+  → Request enable Bluetooth
+  → Request permissions (Bluetooth + Location)
+  → Request discoverable mode (300 seconds)
+  → Start auto mode
+- onResume(): Restart discovery if idle
+- onPause(): Stop discovery to save battery
+- Navigation: NearbyUsersScreen ↔ ChatScreen
+- Show ConnectionRequestDialog as overlay
+```
+
+---
+
+## 🎨 UI Requirements
+
+### NearbyUsersScreen
+- Header: "☕ Café Dating"
+- Security badge: "🔒 End-to-End Encrypted • AES-256"
+- Status card: Shows scanning status, device count
+- User list: Cards with user icon, name, "Tap to connect"
+- Empty state: "No users nearby" with helpful tips
+- Refresh button
+
+### ChatScreen
+- Top bar: User name, "🔒 Encrypted" status, menu (Block, Disconnect)
+- Message list: Chat bubbles (blue for sent, gray for received)
+- Timestamps on messages
+- Input field + Send button
+- Empty state: "💬 Start the conversation!"
+- Rate limit warning if exceeded
+
+### ConnectionRequestDialog
+- Icon: 📱
+- Title: "Connection Request"
+- Text: "[Name] wants to connect. Accept?"
+- Buttons: "✅ Accept" and "❌ Reject"
+
+---
+
+## 📋 AndroidManifest.xml
+
+```xml
+<!-- Bluetooth (Android 11 and below) -->
+<uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+<uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+
+<!-- Bluetooth (Android 12+) -->
+<uses-permission android:name="android.permission.BLUETOOTH_SCAN" 
+    android:usesPermissionFlags="neverForLocation" />
+<uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+<uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
+
+<!-- Location (required for Bluetooth scanning) -->
+<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+<uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
+<uses-feature android:name="android.hardware.bluetooth" android:required="true" />
+```
+
+---
+
+## 🐛 Common Issues to Avoid
+
+### Issue 1: Discovery Not Working
+**Cause**: Location/GPS is OFF or permission denied
+**Fix**: 
+- Check Location is ON in phone settings
+- Request ACCESS_FINE_LOCATION permission
+- Add clear error messages
+
+### Issue 2: Devices Not Appearing
+**Cause**: Only checking BLUETOOTH_SCAN, missing Location permission
+**Fix**: 
+- Android requires Location permission for Bluetooth scanning
+- Check both permissions before starting discovery
+
+### Issue 3: One-Way Messaging
+**Cause**: Only one side calls startListening() or wrong session key
+**Fix**:
+- BOTH phones must call socket.startListening()
+- BOTH phones must collect messageFlow in ChatViewModel
+- Ensure handshake gives same session key to both sides
+
+### Issue 4: Connection Fails Silently
+**Cause**: No user feedback during connection
+**Fix**:
+- Show "Connecting..." overlay
+- Show error messages with auto-dismiss
+- Log everything to Logcat
+
+### Issue 5: Battery Drain
+**Cause**: Discovery continues in background
+**Fix**:
+- Stop discovery in onPause()
+- Restart in onResume()
+- Keep connection alive during chat
+
+---
+
+## ✅ Testing Checklist
+
+### Before Testing:
+- [ ] Install on 2 physical Android phones (emulators don't support Bluetooth well)
+- [ ] Both phones: Bluetooth ON
+- [ ] Both phones: Location/GPS ON
+- [ ] Both phones: All permissions granted
+- [ ] Phones within 5 meters
+
+### Test Scenarios:
+1. **Auto-Discovery**: Both phones open app → see each other in list
+2. **Connection Request**: Tap user → dialog appears on other phone
+3. **Accept Connection**: Accept → both enter chat screen
+4. **Reject Connection**: Reject → connection fails gracefully
+5. **Send Message A→B**: Phone A sends → appears on Phone B
+6. **Send Message B→A**: Phone B sends → appears on Phone A
+7. **Rate Limiting**: Send 10 messages rapidly → some blocked
+8. **Block User**: Block → user disappears, can't reconnect
+9. **Disconnect**: End chat → return to discovery, auto-rescan
+10. **Background/Foreground**: Home → Return → discovery restarts
+
+---
+
+## 📦 Deliverables
+
+Please provide:
+
+1. **Complete Source Code**: All Kotlin files with proper package structure
+2. **AndroidManifest.xml**: With all required permissions
+3. **build.gradle**: With dependencies (Compose, Coroutines, Security-Crypto)
+4. **README.md**: Build instructions and testing steps
+5. **Testing Guide**: Step-by-step testing on 2 phones
+6. **Troubleshooting Guide**: Common issues and fixes
+
+---
+
+## 🎯 Success Criteria
+
+The app is complete when:
+- ✅ Opens and automatically starts discovery
+- ✅ Shows nearby users within 15 seconds
+- ✅ Connection requires user consent (dialog)
+- ✅ Messages work in BOTH directions
+- ✅ All messages are encrypted (AES-256)
+- ✅ Works completely offline (no internet)
+- ✅ No crashes, proper error handling
+- ✅ Battery-efficient (stops discovery in background)
+- ✅ Play Store compliant (security, permissions)
+
+---
+
+## 💡 Additional Notes
+
+- Use descriptive variable names (not `i`, `j`, `x`, `y`)
+- Add comprehensive comments explaining each step
+- Include debug logging (Log.d) for troubleshooting
+- Handle all edge cases (permission denied, Bluetooth off, etc.)
+- Material 3 design with smooth animations
+- Dark mode support
+
+---
+
+## 🚀 Bonus Features (Optional)
+
+If time permits, add:
+- User profile name customization
+- Message delivery confirmation (✓/✓✓)
+- Typing indicator
+- Message timestamps (e.g., "just now", "5m ago")
+- Connection strength indicator
+- Auto-reconnect if connection drops
+- Sound notification for new messages
+
+---
+
+**Generate complete, production-ready code that I can copy-paste and build immediately. Prioritize functionality over perfection - make it work first, then we can optimize.**
+
+---
+
+## Example Usage
+
+```
+PROMPT:
+"Using the specifications above, generate complete code for SecureSocketManager.kt 
+with bidirectional encrypted messaging, proper error handling, and detailed logging."
+
+or
+
+"Generate the complete MainActivity.kt that handles auto-discovery, permissions, 
+and navigation between NearbyUsersScreen and ChatScreen."
+
+or
+
+"Create the full project structure with all files, following the MVVM architecture 
+specified above. Include complete, working implementations."
+```
+
+---
+
+**Start with the most critical components first:**
+1. EncryptionUtils (AES-256)
+2. HandshakeManager (Connection protocol)
+3. SecureSocketManager (Bidirectional messaging)
+4. BluetoothServer + BluetoothClient
+5. DiscoveryManager (Auto-discovery)
+6. ViewModels (State management)
+7. UI Screens (Compose)
+8. MainActivity (Integration)
+
+**Make it production-ready, secure, and Play Store compliant!** 🚀
