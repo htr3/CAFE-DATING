@@ -15,6 +15,7 @@ interface Bluetooth {
 }
 
 interface RequestDeviceOptions {
+  acceptAllDevices?: boolean;
   filters?: BluetoothLEScanFilterInit[];
   optionalServices?: BluetoothServiceUUID[];
 }
@@ -92,13 +93,8 @@ export const BluetoothProvider = ({ children }: { children: ReactNode }) => {
     localStorage.setItem('blocked_devices', JSON.stringify(blockedDevices));
   }, [blockedDevices]);
 
-  // Auto-start scanning on mount if supported
-  useEffect(() => {
-    if (isBluetoothSupported) {
-      startScanning();
-    }
-    return () => stopScanning();
-  }, [isBluetoothSupported]);
+  // Note: Web Bluetooth requires user interaction for scanning
+  // Auto-scanning is disabled to comply with browser security requirements
 
   // Note: Web Bluetooth doesn't support continuous scanning.
   // Scanning is done via user-initiated requestDevice() calls.
@@ -119,8 +115,9 @@ export const BluetoothProvider = ({ children }: { children: ReactNode }) => {
     try {
       setIsScanning(true);
       const device = await navigator.bluetooth.requestDevice({
-        filters: [{ services: [SERVICE_UUID] }],
-        optionalServices: [SERVICE_UUID],
+        acceptAllDevices: true, // For testing, accept all devices
+        // filters: [{ services: [SERVICE_UUID] }],
+        // optionalServices: [SERVICE_UUID],
       });
 
       // Create a Device object from the BluetoothDevice
@@ -155,30 +152,40 @@ export const BluetoothProvider = ({ children }: { children: ReactNode }) => {
 
   const stopScanning = () => setIsScanning(false);
 
-  const connectToDevice = (device: Device) => {
+  const connectToDevice = async (device: Device) => {
     if (blockedDevices.includes(device.id)) return;
-    
+
+    if (!device.bluetoothDevice?.gatt) {
+      toast({
+        variant: "destructive",
+        title: "Connection Failed",
+        description: "Device does not support GATT connection.",
+      });
+      return;
+    }
+
     setConnectionState('connecting');
-    setTimeout(() => {
-      if (Math.random() > 0.2) {
-        setConnectedDevice(device);
-        setConnectionState('connected');
-        setIsScanning(false);
-        toast({
-          title: "Secure Connection Established",
-          description: `Handshake successful with ${device.name}. Encryption keys exchanged.`,
-        });
-        setLocation('/chat');
-      } else {
-        setConnectionState('error');
-        toast({
-          variant: "destructive",
-          title: "Connection Rejected",
-          description: `${device.name} declined the connection request.`,
-        });
-        setTimeout(() => setConnectionState('idle'), 2000);
-      }
-    }, 2000);
+
+    try {
+      await device.bluetoothDevice.gatt.connect();
+      setConnectedDevice(device);
+      setConnectionState('connected');
+      setIsScanning(false);
+      toast({
+        title: "Secure Connection Established",
+        description: `Handshake successful with ${device.name}. Encryption keys exchanged.`,
+      });
+      setLocation('/chat');
+    } catch (error) {
+      console.error('Error connecting to device:', error);
+      setConnectionState('error');
+      toast({
+        variant: "destructive",
+        title: "Connection Failed",
+        description: `Failed to connect to ${device.name}.`,
+      });
+      setTimeout(() => setConnectionState('idle'), 2000);
+    }
   };
 
   const disconnect = () => {

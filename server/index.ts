@@ -7,6 +7,14 @@ import { Server as SocketIOServer } from "socket.io";
 const app = express();
 const httpServer = createServer(app);
 
+// Socket.IO setup
+const io = new SocketIOServer(httpServer, {
+  cors: {
+    origin: process.env.NODE_ENV === "production" ? false : "http://localhost:5000",
+    methods: ["GET", "POST"]
+  }
+});
+
 declare module "http" {
   interface IncomingMessage {
     rawBody: unknown;
