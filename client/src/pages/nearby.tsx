@@ -39,7 +39,7 @@ export default function NearbyPage() {
               <p className="text-xs text-muted-foreground">
                 {isBluetoothSupported
                   ? (isScanning ? "Scanning for devices..." : "Ready to scan")
-                  : "Web Bluetooth not supported"
+                  : "Web Bluetooth not supported on this device/browser"
                 }
               </p>
             </div>

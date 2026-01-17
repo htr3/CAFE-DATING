@@ -85,7 +85,29 @@ export const BluetoothProvider = ({ children }: { children: ReactNode }) => {
 
   // Check for Web Bluetooth support
   useEffect(() => {
-    setIsBluetoothSupported('bluetooth' in navigator);
+    const checkBluetoothSupport = () => {
+      // Basic check for navigator.bluetooth
+      const hasBluetooth = 'bluetooth' in navigator;
+
+      // Additional checks for better compatibility detection
+      const isAndroid = /Android/i.test(navigator.userAgent);
+      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+      const isChrome = /Chrome/.test(navigator.userAgent) && !/Edg/.test(navigator.userAgent);
+      const isEdge = /Edg/.test(navigator.userAgent);
+      const isSamsung = /SamsungBrowser/.test(navigator.userAgent);
+      const isOpera = /OPR/.test(navigator.userAgent);
+
+      // Web Bluetooth is supported on:
+      // - Chrome/Edge/Samsung/Opera on Android
+      // - Chrome/Edge on Windows/Mac (with Bluetooth hardware)
+      // - NOT supported on iOS
+      const supportedBrowsers = (isAndroid && (isChrome || isEdge || isSamsung || isOpera)) ||
+                                (!isIOS && (isChrome || isEdge));
+
+      setIsBluetoothSupported(hasBluetooth && supportedBrowsers);
+    };
+
+    checkBluetoothSupport();
   }, []);
 
   // Persist blocked devices
