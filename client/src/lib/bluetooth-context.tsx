@@ -1,7 +1,43 @@
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { Device, generateMockDevice, simulateScanning } from './mock-bluetooth';
+import { Device } from './mock-bluetooth';
 import { useToast } from '@/hooks/use-toast';
 import { useLocation } from 'wouter';
+
+// Type declarations for Web Bluetooth API
+declare global {
+  interface Navigator {
+    bluetooth: Bluetooth;
+  }
+}
+
+interface Bluetooth {
+  requestDevice(options?: RequestDeviceOptions): Promise<BluetoothDevice>;
+}
+
+interface RequestDeviceOptions {
+  filters?: BluetoothLEScanFilterInit[];
+  optionalServices?: BluetoothServiceUUID[];
+}
+
+interface BluetoothLEScanFilterInit {
+  services?: BluetoothServiceUUID[];
+  name?: string;
+  namePrefix?: string;
+}
+
+interface BluetoothDevice {
+  id: string;
+  name?: string;
+  gatt?: BluetoothRemoteGATTServer;
+}
+
+interface BluetoothRemoteGATTServer {
+  connect(): Promise<BluetoothRemoteGATTServer>;
+  disconnect(): void;
+  connected: boolean;
+}
+
+type BluetoothServiceUUID = string | number;
 
 interface BluetoothContextType {
   isScanning: boolean;
@@ -16,6 +52,7 @@ interface BluetoothContextType {
   rejectConnection: () => void;
   blockDevice: (device: Device) => void;
   connectionState: 'idle' | 'connecting' | 'connected' | 'error';
+  isBluetoothSupported: boolean;
 }
 
 const BluetoothContext = createContext<BluetoothContextType | undefined>(undefined);
@@ -38,55 +75,84 @@ export const BluetoothProvider = ({ children }: { children: ReactNode }) => {
   const [connectedDevice, setConnectedDevice] = useState<Device | null>(null);
   const [pendingRequest, setPendingRequest] = useState<Device | null>(null);
   const [connectionState, setConnectionState] = useState<'idle' | 'connecting' | 'connected' | 'error'>('idle');
+  const [isBluetoothSupported, setIsBluetoothSupported] = useState(false);
   const { toast } = useToast();
   const [, setLocation] = useLocation();
+
+  // Define the service UUID for the app
+  const SERVICE_UUID = '0000cafe-0000-1000-8000-00805f9b34fb';
+
+  // Check for Web Bluetooth support
+  useEffect(() => {
+    setIsBluetoothSupported('bluetooth' in navigator);
+  }, []);
 
   // Persist blocked devices
   useEffect(() => {
     localStorage.setItem('blocked_devices', JSON.stringify(blockedDevices));
   }, [blockedDevices]);
 
-  // Auto-start scanning on mount
+  // Auto-start scanning on mount if supported
   useEffect(() => {
-    startScanning();
-    return () => stopScanning();
-  }, []);
-
-  // Scanning Loop
-  useEffect(() => {
-    let interval: NodeJS.Timeout;
-    if (isScanning && connectionState === 'idle') {
-      interval = setInterval(() => {
-        simulateScanning(
-          devices,
-          (newDevice) => {
-            // Only add if not blocked
-            if (!blockedDevices.includes(newDevice.id)) {
-              setDevices(prev => [...prev, newDevice]);
-            }
-          },
-          (id, updates) => setDevices(prev => prev.map(d => d.id === id ? { ...d, ...updates } : d))
-        );
-      }, 2000);
+    if (isBluetoothSupported) {
+      startScanning();
     }
-    return () => clearInterval(interval);
-  }, [isScanning, devices, connectionState, blockedDevices]);
+    return () => stopScanning();
+  }, [isBluetoothSupported]);
 
-  // Random Incoming Connection Request Simulation
-  useEffect(() => {
-    const interval = setInterval(() => {
-      // Only trigger if not blocked and idle
-      if (connectionState === 'idle' && !pendingRequest && Math.random() > 0.95) {
-        const stranger = generateMockDevice();
-        if (!blockedDevices.includes(stranger.id)) {
-          setPendingRequest(stranger);
-        }
+  // Note: Web Bluetooth doesn't support continuous scanning.
+  // Scanning is done via user-initiated requestDevice() calls.
+
+  // Note: Real Web Bluetooth doesn't simulate incoming requests.
+  // Incoming connections would need to be handled via GATT server mode, which is not implemented here.
+
+  const startScanning = async () => {
+    if (!isBluetoothSupported) {
+      toast({
+        variant: "destructive",
+        title: "Bluetooth Not Supported",
+        description: "Your browser doesn't support Web Bluetooth API.",
+      });
+      return;
+    }
+
+    try {
+      setIsScanning(true);
+      const device = await navigator.bluetooth.requestDevice({
+        filters: [{ services: [SERVICE_UUID] }],
+        optionalServices: [SERVICE_UUID],
+      });
+
+      // Create a Device object from the BluetoothDevice
+      const newDevice: Device = {
+        id: device.id,
+        name: device.name || 'Unknown Device',
+        lastSeen: Date.now(),
+        status: 'available',
+        bluetoothDevice: device,
+        avatar: `https://api.dicebear.com/7.x/notionists/svg?seed=${device.name || device.id}&backgroundColor=transparent`,
+      };
+
+      // Only add if not blocked and not already in list
+      if (!blockedDevices.includes(newDevice.id) && !devices.some(d => d.id === newDevice.id)) {
+        setDevices(prev => [...prev, newDevice]);
+        toast({
+          title: "Device Found",
+          description: `Discovered ${newDevice.name}`,
+        });
       }
-    }, 10000);
-    return () => clearInterval(interval);
-  }, [connectionState, pendingRequest, blockedDevices]);
+    } catch (error) {
+      console.error('Error scanning for devices:', error);
+      toast({
+        variant: "destructive",
+        title: "Scanning Failed",
+        description: "Failed to scan for nearby devices.",
+      });
+    } finally {
+      setIsScanning(false);
+    }
+  };
 
-  const startScanning = () => setIsScanning(true);
   const stopScanning = () => setIsScanning(false);
 
   const connectToDevice = (device: Device) => {
@@ -116,6 +182,9 @@ export const BluetoothProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const disconnect = () => {
+    if (connectedDevice?.bluetoothDevice?.gatt) {
+      connectedDevice.bluetoothDevice.gatt.disconnect();
+    }
     setConnectedDevice(null);
     setConnectionState('idle');
     setIsScanning(true);
@@ -168,7 +237,8 @@ export const BluetoothProvider = ({ children }: { children: ReactNode }) => {
       acceptConnection,
       rejectConnection,
       blockDevice,
-      connectionState
+      connectionState,
+      isBluetoothSupported
     }}>
       {children}
     </BluetoothContext.Provider>

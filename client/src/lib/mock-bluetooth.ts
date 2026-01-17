@@ -1,11 +1,12 @@
 export interface Device {
   id: string;
   name: string;
-  distance: number; // in meters (simulated)
-  rssi: number; // simulated signal strength
+  distance?: number; // optional, estimated if available
+  rssi?: number; // optional, signal strength if available
   lastSeen: number;
   status: 'available' | 'connecting' | 'connected' | 'rejected';
   avatar?: string;
+  bluetoothDevice?: BluetoothDevice; // Reference to the real BluetoothDevice
 }
 
 const FIRST_NAMES = [

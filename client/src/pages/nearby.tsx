@@ -2,11 +2,12 @@ import { useBluetooth } from "@/lib/bluetooth-context";
 import { DeviceCard } from "@/components/device-card";
 import { ScanningRadar } from "@/components/scanning-radar";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Shield, Info } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Shield, Info, Bluetooth, BluetoothOff } from "lucide-react";
 import { motion } from "framer-motion";
 
 export default function NearbyPage() {
-  const { devices, isScanning, connectToDevice } = useBluetooth();
+  const { devices, isScanning, connectToDevice, startScanning, isBluetoothSupported } = useBluetooth();
 
   return (
     <div className="h-full flex flex-col bg-background">
@@ -24,14 +25,37 @@ export default function NearbyPage() {
 
       {/* Status Card */}
       <div className="px-6 py-4">
-        <div className="bg-secondary/50 rounded-2xl p-4 flex items-center justify-between border border-border/50 backdrop-blur-sm">
-          <div className="space-y-0.5">
-            <h2 className="font-semibold text-sm">Bluetooth Radar</h2>
-            <p className="text-xs text-muted-foreground">
-              {isScanning ? "Scanning for devices..." : "Scanner paused"}
-            </p>
+        <div className="bg-secondary/50 rounded-2xl p-4 border border-border/50 backdrop-blur-sm">
+          <div className="flex items-center justify-between">
+            <div className="space-y-0.5">
+              <div className="flex items-center gap-2">
+                <h2 className="font-semibold text-sm">Bluetooth Radar</h2>
+                {isBluetoothSupported ? (
+                  <Bluetooth className="w-4 h-4 text-green-500" />
+                ) : (
+                  <BluetoothOff className="w-4 h-4 text-red-500" />
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {isBluetoothSupported
+                  ? (isScanning ? "Scanning for devices..." : "Ready to scan")
+                  : "Web Bluetooth not supported"
+                }
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              {isScanning && <ScanningRadar />}
+              {isBluetoothSupported && !isScanning && (
+                <Button
+                  size="sm"
+                  onClick={startScanning}
+                  className="rounded-full px-4"
+                >
+                  Scan for Devices
+                </Button>
+              )}
+            </div>
           </div>
-          {isScanning && <ScanningRadar />}
         </div>
       </div>
 
@@ -47,7 +71,12 @@ export default function NearbyPage() {
                <div className="w-16 h-16 bg-muted rounded-full mx-auto flex items-center justify-center">
                  <Info className="w-8 h-8 text-muted-foreground" />
                </div>
-               <p className="text-sm">Looking for active users...</p>
+               <p className="text-sm">
+                 {isBluetoothSupported
+                   ? "Tap 'Scan for Devices' to discover nearby users"
+                   : "Web Bluetooth is not supported in this browser"
+                 }
+               </p>
             </div>
           ) : (
             devices.map(device => (

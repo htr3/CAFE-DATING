@@ -8,7 +8,8 @@ interface DeviceCardProps {
   onConnect: (device: Device) => void;
 }
 
-const getSignalIcon = (rssi: number) => {
+const getSignalIcon = (rssi?: number) => {
+  if (!rssi) return <Signal className="w-4 h-4 text-muted-foreground" />;
   if (rssi > -60) return <SignalHigh className="w-4 h-4 text-green-500" />;
   if (rssi > -75) return <SignalMedium className="w-4 h-4 text-yellow-500" />;
   return <SignalLow className="w-4 h-4 text-orange-500" />;
@@ -35,7 +36,7 @@ export const DeviceCard = ({ device, onConnect }: DeviceCardProps) => {
         <h3 className="font-heading font-semibold text-foreground truncate">{device.name}</h3>
         <p className="text-xs text-muted-foreground flex items-center gap-1">
           <Smartphone className="w-3 h-3" />
-          {device.distance}m away
+          {device.distance ? `${device.distance}m away` : 'Nearby device'}
         </p>
       </div>
 

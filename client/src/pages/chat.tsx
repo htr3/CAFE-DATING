@@ -1,4 +1,5 @@
 import { useBluetooth } from "@/lib/bluetooth-context";
+import { useSocket } from "@/lib/socket-context";
 import { useLocation } from "wouter";
 import { useEffect, useState, useRef } from "react";
 import { Button } from "@/components/ui/button";
@@ -24,8 +25,13 @@ interface Message {
   isEncrypted: boolean;
 }
 
-export default function ChatPage() {
+interface ChatPageProps {
+  onNavigateToNearby: () => void;
+}
+
+export default function ChatPage({ onNavigateToNearby }: ChatPageProps) {
   const { connectedDevice, disconnect, blockDevice, connectionState } = useBluetooth();
+  const socket = useSocket();
   const [, setLocation] = useLocation();
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState("");
@@ -44,24 +50,27 @@ export default function ChatPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Simulated incoming messages
+  // Socket event listeners for real-time messaging
   useEffect(() => {
-    const interval = setInterval(() => {
-      if (Math.random() > 0.8) {
-        const responses = [
-          "Hey there!", 
-          "Is this really offline?", 
-          "Cool app design!", 
-          "How's the coffee nearby?",
-          "Nice to meet you.",
-          "Encrypted vibes only 😎"
-        ];
-        const text = responses[Math.floor(Math.random() * responses.length)];
-        addMessage(text, 'them');
-      }
-    }, 5000);
-    return () => clearInterval(interval);
-  }, []);
+    if (socket && connectedDevice) {
+      socket.emit('join-chat', connectedDevice.id);
+
+      socket.on('receive-message', (message: { text: string; sender: string; timestamp: Date; isEncrypted: boolean }) => {
+        const newMessage: Message = {
+          id: crypto.randomUUID(),
+          sender: 'them',
+          text: message.text,
+          timestamp: new Date(message.timestamp),
+          isEncrypted: message.isEncrypted
+        };
+        setMessages(prev => [...prev, newMessage]);
+      });
+
+      return () => {
+        socket.off('receive-message');
+      };
+    }
+  }, [socket, connectedDevice]);
 
   const addMessage = (text: string, sender: 'me' | 'them') => {
     const newMessage: Message = {
@@ -93,7 +102,7 @@ export default function ChatPage() {
       {/* Chat Header */}
       <div className="h-16 border-b border-border/50 flex items-center justify-between px-4 bg-background/80 backdrop-blur-md sticky top-0 z-10">
         <div className="flex items-center gap-3">
-          <Button variant="ghost" size="icon" className="h-8 w-8 -ml-2 rounded-full" onClick={disconnect}>
+          <Button variant="ghost" size="icon" className="h-8 w-8 -ml-2 rounded-full" onClick={onNavigateToNearby}>
             <ArrowLeft className="w-5 h-5" />
           </Button>
           <div className="flex items-center gap-2">

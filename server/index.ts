@@ -2,6 +2,7 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
+import { Server as SocketIOServer } from "socket.io";
 
 const app = express();
 const httpServer = createServer(app);
@@ -61,6 +62,29 @@ app.use((req, res, next) => {
 
 (async () => {
   await registerRoutes(httpServer, app);
+
+  // Socket.IO setup
+  io.on('connection', (socket) => {
+    log(`Socket connected: ${socket.id}`, 'socket.io');
+
+    socket.on('join-chat', (deviceId: string) => {
+      socket.join(`chat-${deviceId}`);
+      log(`User joined chat room: chat-${deviceId}`, 'socket.io');
+    });
+
+    socket.on('send-message', (data: { deviceId: string; message: string; sender: string }) => {
+      socket.to(`chat-${data.deviceId}`).emit('receive-message', {
+        text: data.message,
+        sender: data.sender,
+        timestamp: new Date(),
+        isEncrypted: true
+      });
+    });
+
+    socket.on('disconnect', () => {
+      log(`Socket disconnected: ${socket.id}`, 'socket.io');
+    });
+  });
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
