@@ -1,39 +1,30 @@
-import { Switch, Route } from "wouter";
-import { queryClient } from "./lib/queryClient";
-import { QueryClientProvider } from "@tanstack/react-query";
-import { Toaster } from "@/components/ui/toaster";
-import { TooltipProvider } from "@/components/ui/tooltip";
 import { BluetoothProvider } from "@/lib/bluetooth-context";
+import { SocketProvider } from "@/lib/socket-context";
 import { MobileWrapper } from "@/components/mobile-wrapper";
 import { ConnectionRequestDialog } from "@/components/connection-request-dialog";
 import NearbyPage from "@/pages/nearby";
 import ChatPage from "@/pages/chat";
 import NotFound from "@/pages/not-found";
+import { io } from "socket.io-client";import { useState } from "react";
 
-function Router() {
+const socket = io();
+
+export default function App() {
+  const [currentPage, setCurrentPage] = useState<"nearby" | "chat">("nearby");
+
   return (
-    <Switch>
-      <Route path="/" component={NearbyPage} />
-      <Route path="/chat" component={ChatPage} />
-      <Route component={NotFound} />
-    </Switch>
+    <BluetoothProvider>
+      <SocketProvider socket={socket}>
+        <MobileWrapper>
+          <ConnectionRequestDialog />
+          {currentPage === "nearby" && (
+            <NearbyPage onNavigateToChat={() => setCurrentPage("chat")} />
+          )}
+          {currentPage === "chat" && (
+            <ChatPage onNavigateToNearby={() => setCurrentPage("nearby")} />
+          )}
+        </MobileWrapper>
+      </SocketProvider>
+    </BluetoothProvider>
   );
 }
-
-function App() {
-  return (
-    <QueryClientProvider client={queryClient}>
-      <TooltipProvider>
-        <BluetoothProvider>
-          <MobileWrapper>
-            <Router />
-            <ConnectionRequestDialog />
-          </MobileWrapper>
-          <Toaster />
-        </BluetoothProvider>
-      </TooltipProvider>
-    </QueryClientProvider>
-  );
-}
-
-export default App;
